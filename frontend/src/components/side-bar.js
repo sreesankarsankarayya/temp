@@ -31,6 +31,7 @@ export class SideBar extends LitElement {
   render() {
     const nav = [
       { id: 'dashboard', label: 'Dashboard', icon: '◫' },
+      { id: 'activity', label: 'Activity', icon: '≡' },
       ...(store.hasRole('sysadmin') ? [{ id: 'tokenomics', label: 'Tokenomics', icon: '↗' }] : []),
       { id: 'settings', label: 'Settings', icon: '⚙' },
     ];

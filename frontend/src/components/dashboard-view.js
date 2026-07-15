@@ -54,6 +54,19 @@ export class DashboardView extends LitElement {
             <div class="stat-sub">bugs & feature requests submitted</div>
           </div>
         </div>
+        <div class="glass page placeholder-card" aria-label="Placeholder">
+          <div class="placeholder-inner">
+            <span class="section-icon" aria-hidden="true">🧩</span>
+            <div>
+              <h2>Dashboard widgets — coming soon</h2>
+              <p class="muted">
+                This area is a placeholder for upcoming dashboard widgets (usage snapshots,
+                recent activity, provider health). Have an idea for what should live here?
+                Use “Report a bug / Request a feature” in the profile menu.
+              </p>
+            </div>
+          </div>
+        </div>
         ${this.myFeedback.length
           ? html`<div class="glass page">
               <h2>My bug reports & feature requests</h2>

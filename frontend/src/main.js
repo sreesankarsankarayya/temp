@@ -4,6 +4,7 @@ import './components/login-view.js';
 import './components/side-bar.js';
 import './components/top-bar.js';
 import './components/dashboard-view.js';
+import './components/activity-view.js';
 import './components/settings-view.js';
 import './components/tokenomics-view.js';
 import './components/changelog-modal.js';

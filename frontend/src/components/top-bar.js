@@ -1,7 +1,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { store } from '../store.js';
 
-const TITLES = { dashboard: 'Dashboard', tokenomics: 'Tokenomics', settings: 'Settings' };
+const TITLES = { dashboard: 'Dashboard', activity: 'Activity log', tokenomics: 'Tokenomics', settings: 'Settings' };
 
 export class TopBar extends LitElement {
   static properties = {

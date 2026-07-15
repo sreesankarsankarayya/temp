@@ -61,6 +61,9 @@ export class AppRoot extends LitElement {
     if (this.route === 'tokenomics' && store.hasRole('sysadmin')) {
       return html`<tokenomics-view></tokenomics-view>`;
     }
+    if (this.route === 'activity') {
+      return html`<activity-view></activity-view>`;
+    }
     if (this.route === 'settings') {
       return html`<settings-view></settings-view>`;
     }
