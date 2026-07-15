@@ -405,6 +405,16 @@ mark { background: #ffe58a; color: inherit; border-radius: 3px; padding: 0 2px; 
 .actions-row { display: flex; gap: 0.6rem; margin-top: 1rem; flex-wrap: wrap; }
 .table-scroll { overflow-x: auto; }
 
+.sidebar-footer .feedback-btn { font-size: 0.82rem; color: var(--text-secondary); }
+.sidebar-footer .feedback-btn:hover { color: var(--text-primary); }
+
+.help-modal { width: min(760px, 100%); }
+.help-section { margin-top: 1.1rem; padding-top: 0.9rem; border-top: 1px solid var(--hairline); }
+.help-section h3 { display: flex; align-items: center; gap: 0.5rem; color: var(--accent-strong); }
+.help-body p, .help-body li { font-size: 0.9rem; color: var(--text-secondary); }
+.help-body table { margin: 0.5rem 0; }
+.chip-active { background: linear-gradient(135deg, var(--accent), var(--accent-strong)); color: #fff; }
+
 .placeholder-card { border-style: dashed; border-width: 2px; box-shadow: none; }
 .placeholder-inner { display: flex; gap: 0.9rem; align-items: flex-start; }
 

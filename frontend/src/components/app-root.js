@@ -83,12 +83,13 @@ export class AppRoot extends LitElement {
           class="glass sidebar ${this.sidebarOpen ? 'open' : ''}"
           .route=${this.route}
           @show-changelog=${() => this.openModal('changelog')}
+          @show-feedback=${() => this.openModal('feedback')}
         ></side-bar>
         <div class="main-col">
           <top-bar
             .route=${this.route}
             @toggle-sidebar=${() => (this.sidebarOpen = !this.sidebarOpen)}
-            @show-feedback=${() => this.openModal('feedback')}
+            @show-help=${() => this.openModal('help')}
           ></top-bar>
           ${this.renderView()}
         </div>
@@ -98,6 +99,9 @@ export class AppRoot extends LitElement {
         : nothing}
       ${this.modal === 'feedback'
         ? html`<feedback-modal @close=${() => (this.modal = null)}></feedback-modal>`
+        : nothing}
+      ${this.modal === 'help'
+        ? html`<help-modal @close=${() => (this.modal = null)}></help-modal>`
         : nothing}
       ${this.renderToasts()}
     `;

@@ -52,6 +52,12 @@ export class SideBar extends LitElement {
         )}
       </nav>
       <div class="sidebar-footer">
+        <button
+          class="feedback-btn"
+          @click=${() => this.dispatchEvent(new CustomEvent('show-feedback'))}
+        >
+          ✉ Report a bug / Request a feature
+        </button>
         <button @click=${this.logout}>⎋ Logout</button>
         <button
           class="version-link"

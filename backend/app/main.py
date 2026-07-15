@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import audit, config, db, seed
 from .logging_setup import setup_logging
-from .routers import activity, auth, backup, feedback, llm_keys, meta, tokenomics, upgrade
+from .routers import activity, auth, backup, feedback, help as help_router, llm_keys, meta, tokenomics, upgrade
 
 log = logging.getLogger("app")
 
@@ -37,7 +37,8 @@ app = FastAPI(title=config.APP_NAME, version=config.version(), lifespan=lifespan
 app.add_middleware(audit.AuditMiddleware)
 
 for router in (auth.router, meta.router, llm_keys.router, feedback.router,
-               tokenomics.router, backup.router, upgrade.router, activity.router):
+               tokenomics.router, backup.router, upgrade.router, activity.router,
+               help_router.router):
     app.include_router(router)
 
 

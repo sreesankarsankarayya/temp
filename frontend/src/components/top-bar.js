@@ -68,8 +68,8 @@ export class TopBar extends LitElement {
                   ⚙ Settings
                 </button>
                 <button class="dd-item" role="menuitem"
-                  @click=${() => { this.menuOpen = false; this.dispatchEvent(new CustomEvent('show-feedback')); }}>
-                  ✉ Report a bug / Request a feature
+                  @click=${() => { this.menuOpen = false; this.dispatchEvent(new CustomEvent('show-help')); }}>
+                  ❓ Help manual
                 </button>
               </div>`
             : nothing}

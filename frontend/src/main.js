@@ -9,6 +9,7 @@ import './components/settings-view.js';
 import './components/tokenomics-view.js';
 import './components/changelog-modal.js';
 import './components/feedback-modal.js';
+import './components/help-modal.js';
 
 if ('serviceWorker' in navigator && !import.meta.env.DEV) {
   window.addEventListener('load', () => {

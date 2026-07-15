@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Role-aware Help manual in the profile dropdown (after Settings): content is filtered
+  server-side so each role sees the right sections at the right depth.
 - Activity log page: application activity from the audit trail with search, action and
   user filters plus pagination. Users see their own activity; sysadmin/admin see everyone's.
 - Dashboard placeholder section for upcoming widgets.
+
+### Changed
+- "Report a bug / Request a feature" moved from the profile dropdown to the bottom of the
+  sidebar, above Logout.
 
 ## [0.0.1] - 2026-07-15
 
