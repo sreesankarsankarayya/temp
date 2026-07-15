@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Skill.md Editor settings section: inline editor and file upload with a unified diff
+  and explicit confirmation before overriding, plus download default/current and
+  restore-to-default. Operators and above can modify; all roles can view/download.
 - Role-aware Help manual in the profile dropdown (after Settings): content is filtered
   server-side so each role sees the right sections at the right depth.
 - Activity log page: application activity from the audit trail with search, action and

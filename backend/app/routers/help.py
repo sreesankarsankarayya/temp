@@ -89,6 +89,25 @@ providers are configured (keys are always masked).
 """,
     },
     {
+        "id": "skill-editor",
+        "title": "Skill.md editor",
+        "icon": "📜",
+        "min_role": "operator",
+        "body": """
+**Settings → Skill.md Editor** maintains the `skill.md` that drives the platform
+assistant. The shipped default is bundled with the app; the active copy lives on
+the data volume.
+
+- **Edit inline or upload** a modified file — either way you are shown a unified
+  diff (current vs proposed) and nothing changes until you explicitly confirm.
+- **Download default** / **Download current** to work on the file locally.
+- **Restore to default** overwrites the active copy with the shipped version
+  (asked to confirm first; disabled while the default is already active).
+- All changes and restores are audit-logged. Regular users can view and download
+  but not modify.
+""",
+    },
+    {
         "id": "activity-all",
         "title": "Application-wide activity",
         "icon": "🔎",

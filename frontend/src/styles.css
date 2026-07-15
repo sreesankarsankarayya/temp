@@ -415,6 +415,19 @@ mark { background: #ffe58a; color: inherit; border-radius: 3px; padding: 0 2px; 
 .help-body table { margin: 0.5rem 0; }
 .chip-active { background: linear-gradient(135deg, var(--accent), var(--accent-strong)); color: #fff; }
 
+.diff-panel { margin-top: 1rem; border: 1px solid var(--hairline); border-radius: 14px; padding: 0.9rem 1rem; background: var(--input-bg); }
+.diff-head { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.5rem; }
+.diff-view {
+  margin: 0; padding: 0.7rem 0.9rem; border-radius: 10px; overflow-x: auto;
+  background: var(--chart-surface); border: 1px solid var(--hairline);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; line-height: 1.5;
+  max-height: 320px; overflow-y: auto; color: var(--text-secondary);
+}
+.diff-view .diff-add { color: var(--success); }
+.diff-view .diff-del { color: var(--danger); }
+.diff-view .diff-hunk { color: var(--accent); }
+.diff-view .diff-file { color: var(--text-muted); font-weight: 600; }
+
 .placeholder-card { border-style: dashed; border-width: 2px; box-shadow: none; }
 .placeholder-inner { display: flex; gap: 0.9rem; align-items: flex-start; }
 
