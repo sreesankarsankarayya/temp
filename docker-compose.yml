@@ -1,0 +1,19 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        # tunnel + DB names follow the folder name
+        APP_NAME: ${APP_NAME:-temp}
+    ports:
+      - '8000:8000'
+    environment:
+      ENV: ${ENV:-DEV}
+      SECRET_KEY: ${SECRET_KEY:-change-me-please-32-chars-minimum}
+      UPGRADE_SIGNING_KEY: ${UPGRADE_SIGNING_KEY:-change-me-upgrade-signing-key}
+      ENABLE_TUNNEL: ${ENABLE_TUNNEL:-1}
+    volumes:
+      - app-data:/data
+
+volumes:
+  app-data:

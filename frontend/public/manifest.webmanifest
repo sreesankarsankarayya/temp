@@ -1,0 +1,14 @@
+{
+  "name": "Platform",
+  "short_name": "Platform",
+  "description": "Glassmorphic PWA platform bootstrap (Vite + Lit + FastAPI)",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#dbeafe",
+  "theme_color": "#dbeafe",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
