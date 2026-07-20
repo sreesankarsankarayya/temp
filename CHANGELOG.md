@@ -17,8 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Dashboard placeholder section for upcoming widgets.
 
 ### Changed
+- Refined the glassmorphic design system in both light and dark themes: calmer bluish
+  gradients, layered glass shadows with inner highlights, refined typography hierarchy
+  (uppercase micro-labels, tighter headings), consistent radii, focus-visible rings,
+  subtle hover micro-interactions, thin scrollbars and polished tables, chips, modals,
+  dropdown and toasts.
 - "Report a bug / Request a feature" moved from the profile dropdown to the bottom of the
   sidebar, above Logout.
+
+### Fixed
+- Profile dropdown could paint underneath page cards (top bar stacking context); it now
+  always renders above the content.
 
 ## [0.0.1] - 2026-07-15
 
