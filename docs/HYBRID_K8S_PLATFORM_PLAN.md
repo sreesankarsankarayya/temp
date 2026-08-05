@@ -20,6 +20,7 @@ Hermes-style learning agent and a visual dashboard (Vite + Lit).
 | Node autoscaling | Karpenter (cloud node pools) + a built-in local node manager (on-prem) |
 | Forecasting | Usage prediction feeding autoscaling recommendations |
 | Agent | "Hermes"-style interact → learn → skill-store loop; primary interaction mode alongside dashboards |
+| LLM gateway | Built-in OpenAI/Anthropic-compatible gateway: hosts local models (vLLM / Ollama), proxies external providers, mints per-app API keys |
 | Licensing rule | All dependencies must be permissive OSS (MIT / Apache-2.0 / BSD / MPL-2.0). No GPL/AGPL runtime linking. |
 
 ### What the executable does end-to-end
@@ -56,6 +57,7 @@ The raw requirements, restated as testable capabilities:
 | R6 | Tunneling + auto sub/sub-subdomain registration | Tunnel manager (cloudflared / rathole / frp) + DNS automation with cert issuance and renewal (§7). |
 | R7 | Karpenter + usage forecasting to tune autoscaling | Karpenter provisions cloud nodes; a forecasting service predicts per-app load and adjusts HPA/Karpenter parameters (§8). |
 | R8 | Hermes-like agent with skills memory | Conversational agent that executes platform operations, observes frequent action sequences, and stores them as replayable skills (§9). |
+| R9 | Built-in LLM gateway with vLLM; connect external + host local models; issue OpenAI/Anthropic-style API keys; configure apps to use the gateway | Gateway subsystem exposing `/v1/chat/completions` and `/v1/messages`; vLLM (GPU) / Ollama (CPU) hosted as managed cluster workloads; virtual keys (`sk-hyphae-…`) minted per app/user with quotas; one-click env-var injection into deployments (§10). |
 
 **Important honesty note on Karpenter (R7):** Karpenter provisions *cloud*
 instances via provider integrations (AWS, Azure, GCP, AlibabaCloud, Oracle —
@@ -115,6 +117,7 @@ hyphae/
 │   ├── hyphae-net/             # tunnels, DNS registration, certificates
 │   ├── hyphae-scale/           # metrics, Karpenter integration, autoscale tuning
 │   ├── hyphae-agent/           # Hermes agent: LLM loop, skills store, activity miner
+│   ├── hyphae-llmgw/           # LLM gateway: OpenAI/Anthropic-compatible API, virtual keys, routing, metering
 │   ├── hyphae-pyhost/          # embedded Python runtime manager + JSON-RPC bridge
 │   └── hyphae-api/             # axum HTTP/WS API + embedded UI assets
 ├── ui/                         # Vite + Lit PWA (built → embedded via rust-embed)
@@ -203,7 +206,9 @@ Rules:
 CPU cores, RAM, free disk, architecture, OS/version, cgroup version,
 virtualization flags (VT-x/AMD-V, Hyper-V, KVM available), existing
 container runtimes, existing kubeconfigs (never clobber), network egress,
-and whether we're inside a VM/container ourselves.
+**GPU inventory** (NVIDIA/AMD devices, driver + CUDA/ROCm versions — feeds
+the LLM-gateway model-hosting matrix in §10.2), and whether we're inside a
+VM/container ourselves.
 
 ### 5.2 Installation pass (`hyphae-bootstrap`)
 
@@ -379,9 +384,10 @@ can, through the same internal API with the same RBAC.
 
 ### 9.2 Architecture
 
-- **LLM connectivity**: reuse the existing key-vault pattern (OpenAI,
-  Anthropic, OpenRouter, vLLM, Ollama, local models) — Fernet/age-encrypted
-  keys; fully functional with a local Ollama model for offline/island mode.
+- **LLM connectivity**: the agent is itself a client of the built-in LLM
+  gateway (§10) — it holds a gateway virtual key and picks a model alias, so
+  provider keys, routing, fallbacks, and metering live in one place; fully
+  functional with a gateway-hosted local model for offline/island mode.
 - **Tooling layer**: every orchestration-core operation is exposed as a typed
   tool (JSON Schema), so the agent's capabilities and the REST API never
   drift. Destructive tools require confirmation unless a policy pre-approves.
@@ -417,7 +423,89 @@ can, through the same internal API with the same RBAC.
 
 ---
 
-## 10. UI (Vite + Lit)
+## 10. Built-in LLM gateway (vLLM + external providers)
+
+The environment ships an **LLM gateway** as a core subsystem: one
+OpenAI/Anthropic-compatible endpoint that fronts both locally hosted models
+and external providers, and mints its own API keys that apps (and the Hermes
+agent) consume. Apps never see upstream provider keys.
+
+### 10.1 API surface (`hyphae-llmgw`, Rust, in the main binary)
+
+- **OpenAI-compatible**: `/v1/chat/completions`, `/v1/completions`,
+  `/v1/embeddings`, `/v1/models` — anything built for the OpenAI SDK works by
+  changing only `base_url` and `api_key`.
+- **Anthropic-compatible**: `/v1/messages` — Anthropic SDKs work the same way.
+- Streaming (SSE) passed through end-to-end; request/response normalized
+  internally to one canonical schema so routing and metering are
+  backend-agnostic.
+- Reachable in-cluster at a stable service DNS name
+  (`http://llm-gateway.hyphae.svc`), on the host at `localhost`, and — if the
+  user chooses — published externally through the tunnel + subdomain
+  machinery of §7 (e.g. `llm.home.example.com`) with TLS.
+
+### 10.2 Model hosting backends (capacity-adaptive, like everything else)
+
+Hosted models run as **managed cluster workloads** (not in-process), deployed
+and health-checked by the workload manager:
+
+| Host profile | Serving engine | Notes |
+|---|---|---|
+| NVIDIA GPU present | **vLLM** (Apache-2.0) | flagship backend: continuous batching, paged attention, OpenAI-compatible natively; bootstrap installs NVIDIA driver check + `nvidia-device-plugin` + container toolkit |
+| AMD GPU (ROCm) | vLLM ROCm build | best-effort tier |
+| CPU-only, ≥ 8 GiB | **Ollama** or `llama.cpp` server (MIT) | small quantized models; keeps agent + apps functional on modest hosts |
+| Island mode | whichever local engine is installed | gateway keeps serving with zero egress |
+
+- **Model catalog**: curated list (weights pulled from Hugging Face with
+  license shown per model — gated/non-commercial models flagged before
+  download); custom model paths supported. Weights cached in a PVC so they
+  survive restarts and are shared across replicas.
+- Model lifecycle in UI/agent: pull → serve (pick engine + quantization/
+  context-length) → warm/cold status → retire. GPU sharing via time-slicing
+  config where applicable.
+
+### 10.3 Provider connectivity (external models through the same door)
+
+- Upstream connectors: OpenAI, Anthropic, OpenRouter, xAI, NVIDIA NIM,
+  any OpenAI-compatible endpoint (existing vLLM/Ollama elsewhere, LongCat…).
+- Upstream credentials live in the existing encrypted key vault — entered
+  once in the gateway settings, never exposed to apps.
+- **Model aliases & routing**: a logical name (e.g. `default-chat`,
+  `fast-embed`) maps to an ordered backend list — e.g. *local vLLM first,
+  fall back to OpenRouter on overload, freeze to local-only in island mode*.
+  Aliases are what apps and skills reference, so swapping providers never
+  touches app config.
+
+### 10.4 Virtual API keys (the "pick a key from here" flow)
+
+- Gateway mints keys in the familiar format: `sk-hyphae-<random>` — created,
+  named, and revoked from the UI or agent chat, exactly like the
+  OpenAI/Anthropic console experience.
+- Each key carries: owner (user/app), allowed model aliases, rate limits,
+  token/cost quotas (day/month), and expiry. Stored hashed (argon2) — shown
+  once at creation.
+- Per-key metering: tokens in/out, latency, cost (provider price sheets for
+  external, amortized estimate for local) — this feeds the existing
+  Tokenomics dashboard and the forecasting loop (§8.3), so LLM traffic gets
+  the same usage-prediction treatment as any workload, and vLLM deployments
+  can be scaled/pre-warmed from predicted demand.
+
+### 10.5 Configuring apps to use the gateway
+
+- **One-click attach** (UI) / "wire this app to the gateway" (agent): creates
+  a scoped virtual key, stores it as a K8s Secret, and injects standard env
+  vars into the deployment:
+  `OPENAI_BASE_URL=http://llm-gateway.hyphae.svc/v1`,
+  `OPENAI_API_KEY=sk-hyphae-…` (and `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`
+  equivalents) — zero code changes for apps using standard SDKs.
+- Detach/rotate re-issues the key and rolls the deployment; deleting an app
+  garbage-collects its keys.
+- Skills can require an LLM capability, so a mined skill like "deploy repo Y
+  with an LLM sidecar" wires the gateway automatically on replay.
+
+---
+
+## 11. UI (Vite + Lit)
 
 Reuse the glassmorphic design system, auth/roles, settings, feedback, audit,
 backup and upgrade machinery already built in this repo. New surfaces:
@@ -431,19 +519,25 @@ backup and upgrade machinery already built in this repo. New surfaces:
    recommendations queue (accept/dismiss/auto), realized-savings tracker.
 5. **Agent** — chat panel (persistent, per-user), skills library with run
    history and approval queue.
-6. **Bootstrap wizard** — first-run experience mirroring the CLI/TUI flow.
+6. **LLM Gateway** — model catalog (hosted + external) with serve/retire
+   controls, model-alias routing editor, virtual-key console
+   (create/scope/revoke, usage per key), and app-attach management.
+7. **Bootstrap wizard** — first-run experience mirroring the CLI/TUI flow.
 
 Transport: REST + WebSocket (live events); the TUI (`ratatui`) offers the
 same core flows for headless servers.
 
 ---
 
-## 11. Security model
+## 12. Security model
 
 - Single admin bootstrap → least-privilege daemon afterwards (§4.2).
 - All fleet traffic over WireGuard/mTLS; join tokens one-shot and short-lived.
 - Secrets: age/Fernet-encrypted at rest in the system DB; cloud creds never
   written to disk unencrypted; SOPS-compatible export.
+- LLM gateway: virtual keys stored hashed (argon2), scoped and quota-bound;
+  upstream provider keys never leave the gateway process; externally
+  published gateway endpoints require TLS + key auth and are rate-limited.
 - Pod Security Admission `restricted` default; gVisor class for untrusted
   workloads; NetworkPolicy default-deny between app namespaces.
 - Full audit: every API/agent/skill action → audit log (existing pattern).
@@ -452,7 +546,7 @@ same core flows for headless servers.
 
 ---
 
-## 12. Delivery roadmap
+## 13. Delivery roadmap
 
 | Milestone | Scope | Exit criteria |
 |---|---|---|
@@ -463,15 +557,18 @@ same core flows for headless servers.
 | **M4 — Expansion** (4 wk) | LAN join, Local Node Manager (VM workers), degradation/recovery state machine | 3-node mixed cluster survives unplug → island → recover cycle |
 | **M5 — Cloud hybrid** (4–5 wk) | EKS attach (Rust), GKE/AKS via pyhost, federated placement, Karpenter install/config | one workload policy-placed across local + cloud; Karpenter scales node group |
 | **M6 — Forecasting** (3 wk) | metrics pipeline, forecasting service, recommendations engine (suggest mode) | forecasts with tracked accuracy; HPA/Karpenter suggestions with predicted savings |
-| **M7 — Agent & skills** (4 wk) | chat agent + typed tools, activity mining, skills store/replay, auto-apply scaling (opt-in) | a mined skill is approved and successfully re-run from chat |
-| **M8 — Hardening** (ongoing) | Windows/macOS parity, stretched-hybrid Phase B, air-gapped fat build, docs | beta release |
+| **M7 — LLM gateway** (3–4 wk) | OpenAI/Anthropic-compatible API, virtual keys + metering, provider connectors, vLLM (GPU) / Ollama (CPU) hosted-model lifecycle, app attach flow | an app with an unmodified OpenAI SDK runs against a gateway key hitting a locally hosted vLLM model, with per-key usage visible |
+| **M8 — Agent & skills** (4 wk) | chat agent (as a gateway client) + typed tools, activity mining, skills store/replay, auto-apply scaling (opt-in) | a mined skill is approved and successfully re-run from chat |
+| **M9 — Hardening** (ongoing) | Windows/macOS parity, stretched-hybrid Phase B, air-gapped fat build, docs | beta release |
 
-Parallelization: M3 and M4 are independent after M2; agent groundwork
-(event log discipline) starts at M0.
+Parallelization: M3 and M4 are independent after M2; the gateway's API/key
+layer (M7) only needs M2, so it can start early in parallel — only its
+hosted-model piece waits on GPU bootstrap; agent groundwork (event log
+discipline) starts at M0.
 
 ---
 
-## 13. Risks & mitigations
+## 14. Risks & mitigations
 
 | Risk | Impact | Mitigation |
 |---|---|---|
@@ -480,13 +577,15 @@ Parallelization: M3 and M4 are independent after M2; agent groundwork
 | Windows support breadth (Hyper-V/WSL2 matrix) | delays | Linux first-class at every milestone; Windows gated to M8 beta |
 | Embedded Python payload size (~40–60 MB compressed) | binary bloat | lazy-extract, optional "slim" build without forecasting/cloudbridge |
 | DNS provider API sprawl | maintenance | Cloudflare + Route53 native; everything else via one Python abstraction |
-| LLM dependency for agent | offline dead agent | tools/skills replay work without an LLM; local Ollama supported |
+| LLM dependency for agent | offline dead agent | tools/skills replay work without an LLM; gateway-hosted local model keeps the agent alive offline |
+| GPU driver/toolkit matrix for vLLM (CUDA versions, container toolkit, ROCm) | hosted models fail on some hosts | driver preflight in detect pass with clear remediation; Ollama/llama.cpp CPU fallback so the gateway always has a working local backend |
+| Model weight licenses vary (some non-commercial/gated) | user compliance risk | per-model license surfaced and acknowledged before download; catalog defaults to permissive-weight models |
 | Privilege footprint scares users | adoption | host ledger + full uninstall + dry-run plan shown before any host mutation |
 | GPL contamination (e.g. some virtualization tooling) | licensing | CI license gate (`cargo-deny`, `pip-licenses`); shell-out (not link) for GPL system tools like QEMU |
 
 ---
 
-## 14. Open questions (need product decisions)
+## 15. Open questions (need product decisions)
 
 1. **Base domain ownership** — bring-your-own-domain only, or also offer a
    free shared suffix (like `*.loca.lt` today) for zero-config users?
@@ -496,13 +595,16 @@ Parallelization: M3 and M4 are independent after M2; agent groundwork
    billable) resources without a human click? Default answer proposed: no.
 4. **Telemetry** — opt-in anonymous usage stats to improve the capacity
    matrix defaults?
-5. **Name** — "hyphae" is a placeholder.
+5. **Gateway exposure default** — is the LLM gateway in-cluster/localhost
+   only by default (proposed), with external publishing via tunnel an
+   explicit per-gateway opt-in?
+6. **Name** — "hyphae" is a placeholder.
 
 ---
 
-## 15. Immediate next steps
+## 16. Immediate next steps
 
-1. Approve/adjust this plan (especially §6.1 phasing and §14 answers).
+1. Approve/adjust this plan (especially §6.1 phasing and §15 answers).
 2. Scaffold the Cargo workspace + CI license gate (M0).
 3. Port the existing Lit design system into `ui/` as the shell.
 4. Spike: k3s unattended install + `kube`-driven health check on a clean VM —
