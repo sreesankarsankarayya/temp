@@ -234,11 +234,27 @@ Rules that keep it honest:
   capabilities ("has KVM", "has Hyper-V", "GPU passthrough possible") and the
   capacity matrix consumes those — so a new OS or a new virtualization
   backend is a new platform backend, not a core change.
+- **Linux is itself many environments** — the Linux backend is a matrix, not
+  a single target, and the same capability-probing discipline applies inside
+  it:
+
+  | Axis | Variants handled | Strategy |
+  |---|---|---|
+  | Package manager | apt, dnf, pacman, apk, zypper, **none/unknown** | native manager preferred; unknown distro → self-contained static payloads (git, tools) from the pinned manifest, no package manager required |
+  | Init system | systemd; OpenRC / runit / SysV; **no init** (containers, WSL, minimal VMs) | systemd units first-class; generic service-file templates for alternatives; initless environments run k3s as a directly supervised child of the hyphae daemon |
+  | libc | glibc, musl (Alpine) | musl-static hyphae build; k3s is static already |
+  | cgroups | v2 (required by modern K8s), v1 legacy | detect pass flags v1 with exact remediation steps before any install is attempted |
+  | Security modules | SELinux (enforcing), AppArmor, none | install k3s-selinux policy where applicable; ship AppArmor profiles; never advise disabling enforcement |
+  | Mutability | conventional; **immutable/atomic** (NixOS, Fedora Silverblue/ostree, SteamOS) | on immutable hosts skip host-package installs entirely — containerized/user-space payloads only, with a capability flag for what that excludes |
+  | Where Linux runs | bare metal, VM guest, **LXC/Proxmox container, WSL itself** | nested-virtualization probe decides whether VM workers are offered; k3s still runs directly when virtualization is absent |
+  | Architecture | x86_64, aarch64 (incl. ARM SBCs as LAN nodes) | Tier-1 builds for both; SBC images preconfigured as join-ready workers |
 - **CI parity from M0:** build + unit tests on all Tier-1 targets every PR;
-  an e2e bootstrap smoke test per OS (Linux container, Windows and macOS
-  runners) gates every milestone. Tier-1: `x86_64/aarch64-linux` (glibc +
-  musl), `x86_64/aarch64-windows`, `aarch64/x86_64-macos`. Tier-2
-  (best-effort): ARM SBCs (Raspberry Pi as LAN nodes), FreeBSD.
+  an e2e bootstrap smoke test per OS gates every milestone — and the Linux
+  smoke test runs across a distro matrix (Debian/Ubuntu, Fedora/RHEL-family,
+  Arch, Alpine, openSUSE, one systemd-free image) in containers/VMs, not just
+  one Ubuntu runner. Tier-1: `x86_64/aarch64-linux` (glibc + musl),
+  `x86_64/aarch64-windows`, `aarch64/x86_64-macos`. Tier-2 (best-effort):
+  immutable distros, FreeBSD.
 - **Feature-gap policy:** when an OS genuinely cannot support a feature
   (e.g. GPU passthrough into WSL2 constraints), the feature degrades with an
   explicit, documented capability flag surfaced in the UI — never a silent
@@ -609,7 +625,7 @@ same core flows for headless servers.
 | **M6 — Forecasting** (3 wk) | metrics pipeline, forecasting service, recommendations engine (suggest mode) | forecasts with tracked accuracy; HPA/Karpenter suggestions with predicted savings |
 | **M7 — LLM gateway** (3–4 wk) | OpenAI/Anthropic-compatible API, virtual keys + metering, provider connectors, vLLM (GPU) / Ollama (CPU) hosted-model lifecycle, app attach flow | an app with an unmodified OpenAI SDK runs against a gateway key hitting a locally hosted vLLM model, with per-key usage visible |
 | **M8 — Agent & skills** (4 wk) | chat agent (as a gateway client) + typed tools, activity mining, skills store/replay, auto-apply scaling (opt-in) | a mined skill is approved and successfully re-run from chat |
-| **M9 — Hardening** (ongoing) | stretched-hybrid Phase B, air-gapped fat build, Tier-2 targets (ARM SBC LAN nodes), docs | beta release |
+| **M9 — Hardening** (ongoing) | stretched-hybrid Phase B, air-gapped fat build, Tier-2 targets (immutable distros, FreeBSD), docs | beta release |
 
 OS parity is **not** a milestone — it is part of every milestone: the CI
 matrix builds and smoke-tests Linux, Windows, and macOS from M0, and each
