@@ -385,14 +385,41 @@ domains, gateway keys, backups, and knowledge-base notes.
 - **Git intake**: repo URL + branch for GitHub or GitLab (including
   self-hosted instances); PAT/deploy-key credentials live in the encrypted
   vault. Clone (git is guaranteed present — bootstrap installed it) → same
-  build/deploy pipeline. Redeploy triggers: manual, poll-on-interval, or
-  webhook (delivered through the tunnel endpoint) on push to the tracked
-  branch.
-- **Lifecycle under the project**: every deploy is versioned with one-click
-  rollback; logs, metrics, scaling recommendations, exposed domains, and
-  LLM-gateway keys are all scoped and listed per project; deleting a project
-  tears down workloads, DNS records, keys, and (optionally, after
-  confirmation) storage.
+  build/deploy pipeline.
+- **Environment-aware deploy policies** (per project, per environment —
+  environments map to namespaces and to the `{app}.{env}.…` subdomain
+  scheme):
+
+  | Environment | What is tracked | When it deploys |
+  |---|---|---|
+  | dev / qa | branch head (configurable branch per env) | **auto-sense and deploy latest**: webhook (delivered through the tunnel endpoint) when reachable, poll-on-interval fallback — every push builds and rolls out automatically |
+  | prod | releases/tags (semver-ordered), not branch heads | **scheduled check windows** (cron-style, e.g. `Sun 02:00`): at each window, if a newer release exists it is built and deployed; optional approval gate and change-freeze windows |
+  | any | — | manual "deploy now" always available (UI/agent), subject to the same pipeline |
+
+  Policy is configuration, not code: switching qa from auto to scheduled, or
+  pointing prod at a release channel, is an edit in the project's settings
+  (agent-operable: "make prod check for releases nightly at 2am").
+- **Rollback & restoration** — applies to every app on the system, whether
+  it arrived via git or zip:
+  - every deploy creates an immutable **revision**: image digest(s), rendered
+    manifests, config/env, and the source ref (commit SHA / release tag / zip
+    checksum) that produced it;
+  - one-click (or one-sentence, via agent) rollback to **any** prior
+    revision — not just the previous one; rollbacks re-use images pinned by
+    digest from the embedded registry, so they work offline and never
+    rebuild;
+  - for stateful workloads, deploys optionally snapshot attached volumes as a
+    **restore point** (reusing the existing backup/DR machinery), so a
+    rollback can restore data alongside code — chosen explicitly at rollback
+    time, since code-only vs. code+data rollback are different decisions;
+  - prod scheduled deploys always create a restore point automatically before
+    applying;
+  - every rollback is itself a revision and an audited event, recorded in the
+    project's KB note with the reason.
+- **Lifecycle under the project**: logs, metrics, scaling recommendations,
+  exposed domains, and LLM-gateway keys are all scoped and listed per
+  project; deleting a project tears down workloads, DNS records, keys, and
+  (optionally, after confirmation) storage.
 
 ### 7.2 Workload manager
 
@@ -708,7 +735,7 @@ same core flows for headless servers.
 |---|---|---|
 | **M0 — Skeleton** (2–3 wk) | Workspace, CI (lint/test/cross-build), axum + embedded UI shell, SQLite core, detect module | one binary serves UI, reports full host profile |
 | **M1 — Bootstrap** (3–4 wk) | git/runtime installers, k3s single-node with capacity matrix, host ledger + uninstall | fresh Linux VM → running k3s + dashboard in one command |
-| **M2 — Workloads & projects** (4 wk) | deploy/manage via `kube`, embedded registry, isolated-pod defaults, project model + zip/git intake (build → deploy pipeline) | a zip with a compose file uploaded from a phone becomes a running, project-scoped app; the same repo deployed via URL+branch redeploys on push |
+| **M2 — Workloads & projects** (4–5 wk) | deploy/manage via `kube`, embedded registry, isolated-pod defaults, project model + zip/git intake, env-aware deploy policies (dev/qa auto-sense, prod scheduled releases), revision history + rollback with restore points | a zip uploaded from a phone becomes a running project-scoped app; a push to the qa branch auto-deploys; prod picks up a new release only in its window; either rolls back to any prior revision offline |
 | **M3 — Expose** (3 wk) | tunnel backends, ingress-DNS controller, ACME certs, sub/sub-subdomain lifecycle | app reachable at `app.env.base` with valid TLS, auto-cleaned on delete |
 | **M4 — Expansion** (4 wk) | LAN join, Local Node Manager (VM workers), degradation/recovery state machine | 3-node mixed cluster survives unplug → island → recover cycle |
 | **M5 — Cloud hybrid** (4–5 wk) | EKS attach (Rust), GKE/AKS via pyhost, federated placement, Karpenter install/config | one workload policy-placed across local + cloud; Karpenter scales node group |
