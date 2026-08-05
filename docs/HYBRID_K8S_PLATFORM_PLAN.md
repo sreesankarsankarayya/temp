@@ -60,6 +60,9 @@ The raw requirements, restated as testable capabilities:
 | R8 | Hermes-like agent with skills memory | Conversational agent that executes platform operations, observes frequent action sequences, and stores them as replayable skills (§9). |
 | R9 | Built-in LLM gateway with vLLM; connect external + host local models; issue OpenAI/Anthropic-style API keys; configure apps to use the gateway | Gateway subsystem exposing `/v1/chat/completions` and `/v1/messages`; vLLM (GPU) / Ollama (CPU) hosted as managed cluster workloads; virtual keys (`sk-hyphae-…`) minted per app/user with quotas; one-click env-var injection into deployments (§10). |
 | R10 | OS agnostic | Identical user-facing behavior on Linux, Windows, and macOS. Native binary per OS; OS differences isolated behind a platform abstraction layer; where a dependency is Linux-only (Kubernetes node components), hyphae transparently manages a lightweight Linux VM as the cluster host (§4.3). CI builds and tests all Tier-1 targets from M0, and every milestone's exit criteria are verified on all three. |
+| R11 | UI accessible on all screen types incl. mobile; agent interaction everywhere | Mobile-first responsive PWA (installable); every critical operation — above all the Hermes chat — usable on small screens; agent chat is the primary mobile surface (§11). |
+| R12 | Zip upload (code + Dockerfile/compose) → auto-created project under user or shared group → deploy, host, manage under that project; same via GitHub/GitLab URL + branch | First-class **Project** entity with owner (user or group), dedicated storage folder, namespace, and UI grouping — auto-created on intake if absent; build → registry → deploy pipeline with redeploys, rollbacks, and per-project domains/keys (§7.1). |
+| R13 | Base info organized per the latest OKF version; viewable as an Obsidian vault from the source machine and via the UI | Per-project + platform knowledge base as plain Markdown with YAML frontmatter and wiki-links following OKF conventions (pinned latest version); stored as a valid Obsidian vault on disk; rendered read/write in the UI (§7.5). |
 
 **Important honesty note on Karpenter (R7):** Karpenter provisions *cloud*
 instances via provider integrations (AWS, Azure, GCP, AlibabaCloud, Oracle —
@@ -359,12 +362,42 @@ Connectivity watcher classifies state: `hybrid`, `local-only`,
 
 ---
 
-## 7. Workloads, isolation, registry, tunneling & DNS
+## 7. Projects, workloads, isolation, registry, tunneling & DNS
 
-### 7.1 Workload manager
+### 7.1 Project model & intake (zip / git)
 
-- Deploy from: image reference, git repo (buildpacks or Dockerfile build via
-  BuildKit), or a compose-like `hyphae.yaml`.
+A **Project** is the first-class unit everything hangs off: workloads,
+domains, gateway keys, backups, and knowledge-base notes.
+
+- **Ownership**: each project belongs to a user or a **shared group**
+  (groups build on the existing role model). Storage layout mirrors it:
+  `/data/projects/<user-or-group>/<project>/` — source snapshots, build
+  logs, manifests, deploy history. The owner folder and UI grouping are
+  auto-created on first intake when they don't exist.
+- **Zip intake** (UI/agent, works from mobile): upload a codebase archive
+  containing a `Dockerfile` or `docker-compose.yml` →
+  server-side safety pass (size limits, path-traversal/zip-bomb checks) →
+  detect build type → BuildKit build → push to the embedded registry →
+  deploy into the project's namespace. Compose files are converted to
+  Kubernetes manifests (compose-spec translation; `kompose`, Apache-2.0, as
+  the reference implementation); multi-service compose maps to one project
+  with multiple workloads.
+- **Git intake**: repo URL + branch for GitHub or GitLab (including
+  self-hosted instances); PAT/deploy-key credentials live in the encrypted
+  vault. Clone (git is guaranteed present — bootstrap installed it) → same
+  build/deploy pipeline. Redeploy triggers: manual, poll-on-interval, or
+  webhook (delivered through the tunnel endpoint) on push to the tracked
+  branch.
+- **Lifecycle under the project**: every deploy is versioned with one-click
+  rollback; logs, metrics, scaling recommendations, exposed domains, and
+  LLM-gateway keys are all scoped and listed per project; deleting a project
+  tears down workloads, DNS records, keys, and (optionally, after
+  confirmation) storage.
+
+### 7.2 Workload manager
+
+- Deploy from: a project intake (§7.1 — zip or git), a bare image reference,
+  or a compose-like `hyphae.yaml`.
 - **Isolated pods**: per-workload namespaces + NetworkPolicy + PSA
   `restricted` by default; optional **gVisor** (`runsc`, Apache-2.0) runtime
   class for untrusted workloads, or **Kata Containers** where virtualization
@@ -373,7 +406,7 @@ Connectivity watcher classifies state: `hybrid`, `local-only`,
   pull-through cache of upstream registries; images survive offline periods;
   UI for image inventory and GC.
 
-### 7.2 Tunnel manager
+### 7.3 Tunnel manager
 
 Pluggable backends, chosen by what the user has:
 
@@ -384,7 +417,7 @@ Pluggable backends, chosen by what the user has:
 | `frp` (Apache-2.0) | alternative self-hosted option |
 | WireGuard mesh | node-to-node fleet traffic (not app publishing) |
 
-### 7.3 Sub / sub-subdomain automation
+### 7.4 Sub / sub-subdomain automation
 
 - Naming scheme: `{app}.{env}.{cluster}.{base-domain}` — e.g.
   `api.dev.home.example.com` (sub-subdomains are just deeper labels; DNS
@@ -397,6 +430,42 @@ Pluggable backends, chosen by what the user has:
   internal CA (`rcgen`) for LAN-only names; renewal + revocation maintained
   automatically ("and maintain" in the requirement = renewal, drift repair,
   and cleanup of records for deleted apps).
+
+### 7.5 Knowledge base — OKF organization, Obsidian-vault compatible
+
+All "base info" — platform facts and per-project documentation — is managed
+as a structured, plain-text knowledge base:
+
+- **Format**: Markdown files with YAML frontmatter and `[[wiki-links]]`,
+  organized per the **OKF** conventions, pinned to the latest published OKF
+  version at build time; the version in use is recorded in the vault's
+  metadata and migrations between OKF versions are applied by the platform,
+  never by hand. *(Interpretation to confirm in §15: OKF read as the
+  open knowledge-organization framework/spec you intend; the storage layer is
+  spec-agnostic Markdown + frontmatter, so pinning to a different convention
+  is a template change, not an architecture change.)*
+- **Layout**: `/data/kb/` is a **valid Obsidian vault** (a `.obsidian/`
+  config with sane defaults is generated) — open it directly from the source
+  machine in Obsidian; the exact path is surfaced in the UI and via
+  `hyphae kb path`. Structure mirrors ownership:
+  `kb/projects/<owner-or-group>/<project>/…`, `kb/platform/…`,
+  `kb/skills/…`.
+- **Content, written by the system**: per-project overview (source origin —
+  zip or repo+branch), deploy history with outcomes, exposed endpoints and
+  domains, gateway keys in use (names only, never secrets), scaling
+  recommendations and their realized results, incident notes, and the
+  agent's learnings — the KB is the agent's human-readable long-term memory
+  surface, cross-linked with the skills store (skills are themselves
+  Markdown-described in `kb/skills/`).
+- **Obsidian is a viewer, not a dependency**: Obsidian itself is not open
+  source, so it is never bundled or required — hyphae only guarantees the
+  vault is fully compatible. The files stay plain Markdown; any editor works.
+- **OKF view in the UI**: the UI renders the vault read/write — Markdown
+  editing, frontmatter forms, wiki-link navigation, backlink panel, and a
+  link-graph view — so the same knowledge is reachable from a phone, the
+  desktop UI, or Obsidian on the source machine. Concurrent edits are
+  handled by the KB being a local git repository under the hood (auto-commit
+  with attributed authorship; history browsable in the UI).
 
 ---
 
@@ -574,21 +643,38 @@ and health-checked by the workload manager:
 ## 11. UI (Vite + Lit)
 
 Reuse the glassmorphic design system, auth/roles, settings, feedback, audit,
-backup and upgrade machinery already built in this repo. New surfaces:
+backup and upgrade machinery already built in this repo.
 
-1. **Fleet map** — nodes (local/VM/LAN/cloud) with live health, capacity, and
+**Every screen size is a first-class client (R11).** The PWA is mobile-first
+and installable: all critical operations work on a phone — approving a
+recommendation, uploading a project zip, watching a deploy, revoking a key —
+with the **agent chat as the primary mobile surface** (bottom-nav shortcut,
+persistent conversation, voice-input friendly). Dashboards reflow from
+multi-pane desktop layouts to single-column cards; tables become cards;
+diagrams pan/zoom. Touch targets, safe-area insets, and WCAG 2.2 AA are
+acceptance criteria, not polish. Anything doable in the UI is also doable by
+asking the agent — which is what makes small screens fully capable.
+
+New surfaces:
+
+1. **Projects** — per user/shared group: intake (zip upload or repo+branch),
+   build logs, deploy history with rollback, and the project's domains, keys,
+   and KB notes in one place.
+2. **Fleet map** — nodes (local/VM/LAN/cloud) with live health, capacity, and
    connectivity state; expansion actions inline.
-2. **Workloads** — deployments, pods, images (registry browser), one-click
+3. **Workloads** — deployments, pods, images (registry browser), one-click
    expose (tunnel + domain).
-3. **Network** — tunnels, domains/subdomains, certificates with expiry.
-4. **Scaling & forecast** — usage graphs with forecast overlay,
+4. **Network** — tunnels, domains/subdomains, certificates with expiry.
+5. **Scaling & forecast** — usage graphs with forecast overlay,
    recommendations queue (accept/dismiss/auto), realized-savings tracker.
-5. **Agent** — chat panel (persistent, per-user), skills library with run
+6. **Agent** — chat panel (persistent, per-user), skills library with run
    history and approval queue.
-6. **LLM Gateway** — model catalog (hosted + external) with serve/retire
+7. **LLM Gateway** — model catalog (hosted + external) with serve/retire
    controls, model-alias routing editor, virtual-key console
    (create/scope/revoke, usage per key), and app-attach management.
-7. **Bootstrap wizard** — first-run experience mirroring the CLI/TUI flow.
+8. **Knowledge (OKF view)** — the vault rendered read/write: Markdown editor,
+   frontmatter forms, wiki-link navigation, backlinks, and link graph (§7.5).
+9. **Bootstrap wizard** — first-run experience mirroring the CLI/TUI flow.
 
 Transport: REST + WebSocket (live events); the TUI (`ratatui`) offers the
 same core flows for headless servers.
@@ -606,6 +692,10 @@ same core flows for headless servers.
   published gateway endpoints require TLS + key auth and are rate-limited.
 - Pod Security Admission `restricted` default; gVisor class for untrusted
   workloads; NetworkPolicy default-deny between app namespaces.
+- Intake hardening: uploaded zips are size-capped and scanned for
+  path-traversal/zip bombs before unpack; builds run in isolated BuildKit
+  sandboxes; git intake credentials are scoped deploy keys/PATs held in the
+  vault, never embedded in project storage.
 - Full audit: every API/agent/skill action → audit log (existing pattern).
 - Supply chain: pinned tool manifest with SHA-256, cosign verification where
   publishers sign (k3s, cloudflared); reproducible builds goal for our binary.
@@ -618,13 +708,13 @@ same core flows for headless servers.
 |---|---|---|
 | **M0 — Skeleton** (2–3 wk) | Workspace, CI (lint/test/cross-build), axum + embedded UI shell, SQLite core, detect module | one binary serves UI, reports full host profile |
 | **M1 — Bootstrap** (3–4 wk) | git/runtime installers, k3s single-node with capacity matrix, host ledger + uninstall | fresh Linux VM → running k3s + dashboard in one command |
-| **M2 — Workloads** (3 wk) | deploy/manage via `kube`, embedded registry, isolated-pod defaults | deploy, isolate, and serve an app fully offline |
+| **M2 — Workloads & projects** (4 wk) | deploy/manage via `kube`, embedded registry, isolated-pod defaults, project model + zip/git intake (build → deploy pipeline) | a zip with a compose file uploaded from a phone becomes a running, project-scoped app; the same repo deployed via URL+branch redeploys on push |
 | **M3 — Expose** (3 wk) | tunnel backends, ingress-DNS controller, ACME certs, sub/sub-subdomain lifecycle | app reachable at `app.env.base` with valid TLS, auto-cleaned on delete |
 | **M4 — Expansion** (4 wk) | LAN join, Local Node Manager (VM workers), degradation/recovery state machine | 3-node mixed cluster survives unplug → island → recover cycle |
 | **M5 — Cloud hybrid** (4–5 wk) | EKS attach (Rust), GKE/AKS via pyhost, federated placement, Karpenter install/config | one workload policy-placed across local + cloud; Karpenter scales node group |
 | **M6 — Forecasting** (3 wk) | metrics pipeline, forecasting service, recommendations engine (suggest mode) | forecasts with tracked accuracy; HPA/Karpenter suggestions with predicted savings |
 | **M7 — LLM gateway** (3–4 wk) | OpenAI/Anthropic-compatible API, virtual keys + metering, provider connectors, vLLM (GPU) / Ollama (CPU) hosted-model lifecycle, app attach flow | an app with an unmodified OpenAI SDK runs against a gateway key hitting a locally hosted vLLM model, with per-key usage visible |
-| **M8 — Agent & skills** (4 wk) | chat agent (as a gateway client) + typed tools, activity mining, skills store/replay, auto-apply scaling (opt-in) | a mined skill is approved and successfully re-run from chat |
+| **M8 — Agent, skills & knowledge base** (4–5 wk) | chat agent (as a gateway client) + typed tools, activity mining, skills store/replay, auto-apply scaling (opt-in), OKF knowledge base (vault on disk + UI view, system- and agent-written) | a mined skill is approved and re-run from chat; the project's KB note opens identically in Obsidian and the UI |
 | **M9 — Hardening** (ongoing) | stretched-hybrid Phase B, air-gapped fat build, Tier-2 targets (immutable distros, FreeBSD), docs | beta release |
 
 OS parity is **not** a milestone — it is part of every milestone: the CI
@@ -671,7 +761,11 @@ discipline) starts at M0.
 5. **Gateway exposure default** — is the LLM gateway in-cluster/localhost
    only by default (proposed), with external publishing via tunnel an
    explicit per-gateway opt-in?
-6. **Name** — "hyphae" is a placeholder.
+6. **OKF spec** — confirm which "OKF" the knowledge organization should pin
+   to (the plan assumes an open knowledge-framework convention of Markdown +
+   YAML frontmatter + wiki-links, applied as templates over a spec-agnostic
+   store — so correcting this is a template change, not a redesign).
+7. **Name** — "hyphae" is a placeholder.
 
 ---
 
