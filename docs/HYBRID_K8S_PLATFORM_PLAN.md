@@ -14,6 +14,7 @@ Hermes-style learning agent and a visual dashboard (Vite + Lit).
 | Aspect | Decision |
 |---|---|
 | Core runtime | Rust (single static executable per OS/arch) |
+| OS support | **OS-agnostic by design**: Linux, Windows, and macOS are all Tier-1 from day one — one behavior contract, per-OS backends behind a platform abstraction layer (§4.3) |
 | UI | Vite + Lit PWA, compiled and **embedded into the binary** |
 | Periphery | Python 3.12 (only where no permissively-licensed Rust library exists) |
 | Cluster engines | k3s (default), k0s / kubeadm (large hosts), managed cloud K8s (EKS/GKE/AKS) for hybrid expansion |
@@ -58,6 +59,7 @@ The raw requirements, restated as testable capabilities:
 | R7 | Karpenter + usage forecasting to tune autoscaling | Karpenter provisions cloud nodes; a forecasting service predicts per-app load and adjusts HPA/Karpenter parameters (§8). |
 | R8 | Hermes-like agent with skills memory | Conversational agent that executes platform operations, observes frequent action sequences, and stores them as replayable skills (§9). |
 | R9 | Built-in LLM gateway with vLLM; connect external + host local models; issue OpenAI/Anthropic-style API keys; configure apps to use the gateway | Gateway subsystem exposing `/v1/chat/completions` and `/v1/messages`; vLLM (GPU) / Ollama (CPU) hosted as managed cluster workloads; virtual keys (`sk-hyphae-…`) minted per app/user with quotas; one-click env-var injection into deployments (§10). |
+| R10 | OS agnostic | Identical user-facing behavior on Linux, Windows, and macOS. Native binary per OS; OS differences isolated behind a platform abstraction layer; where a dependency is Linux-only (Kubernetes node components), hyphae transparently manages a lightweight Linux VM as the cluster host (§4.3). CI builds and tests all Tier-1 targets from M0, and every milestone's exit criteria are verified on all three. |
 
 **Important honesty note on Karpenter (R7):** Karpenter provisions *cloud*
 instances via provider integrations (AWS, Azure, GCP, AlibabaCloud, Oracle —
@@ -110,6 +112,7 @@ hyphae/
 ├── crates/
 │   ├── hyphae-cli/             # main binary: CLI + TUI entry, embeds UI + python payloads
 │   ├── hyphae-core/            # orchestration state machine, task queue, event log
+│   ├── hyphae-platform/        # OS abstraction: privilege, services, packages, virt, mesh (only crate with cfg(target_os))
 │   ├── hyphae-detect/          # OS/hardware/virtualization capability probing
 │   ├── hyphae-bootstrap/       # installers: git, runtimes, virtualizers, k8s flavors
 │   ├── hyphae-cluster/         # cluster lifecycle: init, join, hybrid attach, degrade/recover
@@ -192,10 +195,54 @@ Rules:
   operations go through a small setuid-free helper invoked via systemd units.
 - **Windows**: manifest requests elevation (UAC); installs as a Windows
   service; Hyper-V/WSL2 feature enablement handled with clear reboot prompts.
-- **macOS** (dev-grade support): admin via `authorization services`; Lima/Vz
-  virtualization backend.
+- **macOS**: admin via Authorization Services; installs as a `launchd`
+  daemon; Lima / Virtualization.framework backend.
 - Everything the bootstrapper changes on the host is recorded in a **host
   ledger** (SQLite) enabling `hyphae uninstall` to fully revert.
+
+### 4.3 Platform abstraction layer (OS-agnostic by construction)
+
+hyphae is OS-agnostic as a hard requirement, not a porting afterthought.
+All OS-specific behavior lives behind a single crate boundary
+(`hyphae-platform`) of capability traits with one backend per OS:
+
+| Capability trait | Linux | Windows | macOS |
+|---|---|---|---|
+| Privilege escalation | sudo / pkexec | UAC elevation | Authorization Services |
+| Service supervision | systemd | Service Control Manager | launchd |
+| Package installation | apt / dnf / pacman / apk / zypper | winget (choco fallback) | brew (pkg fallback) |
+| Virtualization | KVM/QEMU via libvirt | Hyper-V / WSL2 | Lima / Virtualization.framework |
+| VPN mesh | WireGuard kernel module | WireGuardNT | wireguard-go |
+| Firewall/network | nftables | Windows Filtering Platform | pf |
+| Paths, ledger, logs | XDG dirs | ProgramData/known folders | /Library + ~/Library |
+
+Rules that keep it honest:
+
+- **No `#[cfg(target_os)]` outside `hyphae-platform`.** Core, cluster,
+  workload, net, scale, agent, and gateway code compile against traits only —
+  the compiler enforces the boundary.
+- **The Linux-kernel reality, handled once:** Kubernetes node components
+  (kubelet, containerd, CNI) are Linux-native. On Linux, k3s/k0s run directly
+  on the host. On Windows and macOS, the platform layer provisions and
+  manages a lightweight Linux **cluster-host VM** (WSL2 on Windows, Lima on
+  macOS) that runs the exact same k3s payload — same version, same manifests,
+  same registry. Everything above the platform layer is unaware of the shim:
+  port forwarding, file shares, and VM lifecycle (start at boot, health
+  checks, resource resizing) are the platform backend's job. Windows worker
+  nodes for Windows containers remain a possible Tier-2 extension.
+- **Capability probing, not OS probing:** the detect module reports
+  capabilities ("has KVM", "has Hyper-V", "GPU passthrough possible") and the
+  capacity matrix consumes those — so a new OS or a new virtualization
+  backend is a new platform backend, not a core change.
+- **CI parity from M0:** build + unit tests on all Tier-1 targets every PR;
+  an e2e bootstrap smoke test per OS (Linux container, Windows and macOS
+  runners) gates every milestone. Tier-1: `x86_64/aarch64-linux` (glibc +
+  musl), `x86_64/aarch64-windows`, `aarch64/x86_64-macos`. Tier-2
+  (best-effort): ARM SBCs (Raspberry Pi as LAN nodes), FreeBSD.
+- **Feature-gap policy:** when an OS genuinely cannot support a feature
+  (e.g. GPU passthrough into WSL2 constraints), the feature degrades with an
+  explicit, documented capability flag surfaced in the UI — never a silent
+  difference in behavior.
 
 ---
 
@@ -232,6 +279,9 @@ verify → install → configure → health-check phases:
 
 - Flavor choice is a **recommendation the user confirms** (via agent or UI),
   with overrides.
+- The matrix is OS-independent: on Windows and macOS the chosen flavor runs
+  inside the managed cluster-host VM (§4.3), sized against the host's real
+  capacity minus a reserved headroom; on Linux it runs directly on the host.
 - All manifests we lay down (registry, tunnel agents, forecasting collectors)
   are Helm-free static YAML rendered by `minijinja`, applied via `kube` —
   fewer moving parts than depending on helm at bootstrap time.
@@ -559,7 +609,13 @@ same core flows for headless servers.
 | **M6 — Forecasting** (3 wk) | metrics pipeline, forecasting service, recommendations engine (suggest mode) | forecasts with tracked accuracy; HPA/Karpenter suggestions with predicted savings |
 | **M7 — LLM gateway** (3–4 wk) | OpenAI/Anthropic-compatible API, virtual keys + metering, provider connectors, vLLM (GPU) / Ollama (CPU) hosted-model lifecycle, app attach flow | an app with an unmodified OpenAI SDK runs against a gateway key hitting a locally hosted vLLM model, with per-key usage visible |
 | **M8 — Agent & skills** (4 wk) | chat agent (as a gateway client) + typed tools, activity mining, skills store/replay, auto-apply scaling (opt-in) | a mined skill is approved and successfully re-run from chat |
-| **M9 — Hardening** (ongoing) | Windows/macOS parity, stretched-hybrid Phase B, air-gapped fat build, docs | beta release |
+| **M9 — Hardening** (ongoing) | stretched-hybrid Phase B, air-gapped fat build, Tier-2 targets (ARM SBC LAN nodes), docs | beta release |
+
+OS parity is **not** a milestone — it is part of every milestone: the CI
+matrix builds and smoke-tests Linux, Windows, and macOS from M0, and each
+milestone's exit criteria must pass on all three (M1's, for example, means a
+fresh Windows machine reaches a running k3s-in-WSL2 + dashboard in one
+command, same as Linux).
 
 Parallelization: M3 and M4 are independent after M2; the gateway's API/key
 layer (M7) only needs M2, so it can start early in parallel — only its
@@ -574,7 +630,8 @@ discipline) starts at M0.
 |---|---|---|
 | Stretched hybrid control plane instability (latency, etcd) | cluster outages | ship federated model first; stretch mode opt-in + WireGuard + local-first scheduling |
 | Karpenter expectations on-prem | confusion | explicit capacity story: Karpenter = cloud, Local Node Manager = local; one UI |
-| Windows support breadth (Hyper-V/WSL2 matrix) | delays | Linux first-class at every milestone; Windows gated to M8 beta |
+| K8s node components are Linux-only → Windows/macOS need a VM shim (WSL2/Lima) | complexity, perf overhead, VM lifecycle bugs | shim owned entirely by the platform layer with its own health checks and e2e suite; same k3s payload on every OS so cluster behavior never forks |
+| Three-OS parity slows every milestone | schedule pressure | platform trait boundary keeps OS work parallel to feature work; capability flags allow explicit, documented degradation instead of blocking a release |
 | Embedded Python payload size (~40–60 MB compressed) | binary bloat | lazy-extract, optional "slim" build without forecasting/cloudbridge |
 | DNS provider API sprawl | maintenance | Cloudflare + Route53 native; everything else via one Python abstraction |
 | LLM dependency for agent | offline dead agent | tools/skills replay work without an LLM; gateway-hosted local model keeps the agent alive offline |
